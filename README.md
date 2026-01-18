@@ -24,38 +24,27 @@ GRALPH reads task definitions, schedules them with dependencies and mutexes, and
 
 ## Setup
 
-### Option 1: Copy to your project
-
 ```bash
 # From your project root
 mkdir -p scripts/gralph
 cp /path/to/gralph/gralph.sh scripts/gralph/
-cp /path/to/gralph/prompt.md scripts/gralph/
-cp /path/to/gralph/prd.json.example scripts/gralph/
 chmod +x scripts/gralph/gralph.sh
-```
 
-### Option 2: Install skills globally
-
-```bash
-cp -r skills/prd ~/.config/amp/skills/
-cp -r skills/ralph ~/.config/amp/skills/
+# Install required skills for the selected engine
+./scripts/gralph/gralph.sh --init
 ```
 
 ## Usage
 
 ```bash
-# Run with YAML task file (recommended)
-./scripts/gralph/gralph.sh --yaml examples/personal-landing/tasks.yaml --parallel
-
-# Run with specific engine
+# OpenCode: write PRD to PRD.md, then run gralph
 ./scripts/gralph/gralph.sh --opencode --parallel
+
+# Use an existing tasks.yaml
+./scripts/gralph/gralph.sh --yaml tasks.yaml --parallel
 
 # Limit parallelism
 ./scripts/gralph/gralph.sh --parallel --max-parallel 2
-
-# Run sequentially
-./scripts/gralph/gralph.sh --yaml examples/personal-landing/tasks.yaml
 ```
 
 ## Configuration
@@ -108,45 +97,24 @@ git checkout <branch>
 
 ## Workflow
 
-1) Write a PRD or provide a `tasks.yaml`
-2) Run gralph with your preferred engine:
-   ```bash
-   ./scripts/gralph/gralph.sh --opencode --parallel
-   ```
+1) Ask your engine to write a PRD to `PRD.md`
+2) Run gralph; it creates `tasks.yaml` and executes tasks
 3) Inspect artifacts and merge/PR as needed
 
-### Engines
+Engines:
+- `--opencode`
+- `--claude`
+- `--cursor`
+- `--codex`
 
-GRALPH supports multiple AI engines:
-- `--opencode` (OpenCode)
-- `--claude` (Claude Code)
-- `--cursor` (Cursor)
-- `--codex` (Codex CLI)
-
-### Skills
-
-GRALPH uses skills for reusable instruction bundles. Each engine can install its own skills:
-
-**For OpenCode users:**
-```bash
-# Load PRD skill and create a PRD for your feature
-Load prd skill and create a PRD for [feature description]
-
-# Convert the PRD to gralph format
-Load ralph skill and convert tasks/prd-[feature].md to prd.json
-
-# Run gralph
-./scripts/gralph/gralph.sh --opencode --parallel
-```
-
-Available skills:
-- `prd` - Generate PRDs
-- `ralph` - Convert PRDs to JSON
-- `task-metadata` - Task metadata validation
-- `dag-planner` - DAG planning and validation
-- `parallel-safe-implementation` - Parallel execution guidelines
-- `merge-integrator` - Branch merging
-- `semantic-reviewer` - Code review
+Skills used by gralph:
+- `prd`
+- `ralph`
+- `task-metadata`
+- `dag-planner`
+- `parallel-safe-implementation`
+- `merge-integrator`
+- `semantic-reviewer`
 
 ## Contributing
 

@@ -38,7 +38,7 @@ MAX_PARALLEL=3
 
 # PRD source options
 PRD_SOURCE="markdown"  # markdown, yaml, github
-PRD_FILE="scripts/gralph/prompt.md"
+PRD_FILE="PRD.md"
 GITHUB_REPO=""
 GITHUB_LABEL=""
 
@@ -608,7 +608,7 @@ parse_args() {
         shift
         ;;
       --prd)
-        PRD_FILE="${2:-scripts/gralph/prompt.md}"
+        PRD_FILE="${2:-PRD.md}"
         PRD_SOURCE="markdown"
         shift 2
         ;;
