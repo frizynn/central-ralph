@@ -2,7 +2,7 @@ version: 1
 tasks:
   - id: TASK-001
     title: "Set up frontend scaffold and config hooks (scheduler/social links), ensure lint/type tooling ready"
-    completed: false
+    completed: true
     dependsOn: []
     mutex: ["lockfile", "global-config"]
   - id: TASK-002

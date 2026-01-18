@@ -2810,6 +2810,11 @@ run_parallel_tasks_yaml_v1() {
       printf "  ${DIM}○${RESET} Agent %d: ${DIM}Initializing...${RESET}\n" "${batch_agent_nums[$j]}"
     done
     
+    # Hide cursor during progress updates to prevent flickering
+    printf "\e[?25l"
+    # Ensure cursor is restored on exit/interrupt
+    trap 'printf "\e[?25h"' EXIT INT TERM
+    
     while true; do
       local all_done=true
       local done_count=0 failed_count=0
@@ -2883,6 +2888,10 @@ run_parallel_tasks_yaml_v1() {
       sleep 0.3
     done
     
+    # Restore cursor visibility
+    printf "\e[?25h"
+    trap - EXIT INT TERM
+    
     # Wait for processes
     for pid in "${batch_pids[@]}"; do
       wait "$pid" 2>/dev/null || true
@@ -2911,7 +2920,11 @@ run_parallel_tasks_yaml_v1() {
         scheduler_fail_task "$task_id"
         printf "  ${RED}✗${RESET} %s (%s)\n" "${title:0:45}" "$task_id"
         if [[ -s "${log_files[$j]}" ]]; then
-          echo "${DIM}    Error: $(tail -1 "${log_files[$j]}")${RESET}"
+          # Show last non-DEBUG line as error
+          local err_msg
+          err_msg=$(grep -v '^\[DEBUG\]' "${log_files[$j]}" | tail -1)
+          [[ -z "$err_msg" ]] && err_msg=$(tail -1 "${log_files[$j]}")
+          echo "${DIM}    Error: ${err_msg}${RESET}"
         fi
       fi
       
@@ -3120,6 +3133,11 @@ run_parallel_tasks() {
       local spin_idx=0
       local start_time=$SECONDS
 
+      # Hide cursor during progress updates to prevent flickering
+      printf "\e[?25l"
+      # Ensure cursor is restored on exit/interrupt
+      trap 'printf "\e[?25h"' EXIT INT TERM
+
       while true; do
         # Check if all processes are done
         local all_done=true
@@ -3182,6 +3200,10 @@ run_parallel_tasks() {
         spin_idx=$(( (spin_idx + 1) % ${#spinner_chars} ))
         sleep 0.3
       done
+
+      # Restore cursor visibility
+      printf "\e[?25h"
+      trap - EXIT INT TERM
 
       # Wait for all processes to fully complete
       for pid in "${parallel_pids[@]}"; do
