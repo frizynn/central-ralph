@@ -126,7 +126,7 @@ slugify() {
 # Extract prd-id from PRD file
 extract_prd_id() {
   local prd_file=$1
-  grep -m1 '^prd-id:' "$prd_file" 2>/dev/null | sed 's/^prd-id:[[:space:]]*//' | tr -d '\r'
+  sed -n 's/^prd-id:[[:space:]]*//p' "$prd_file" | head -n1 | tr -d '\r'
 }
 
 # Setup PRD run directory

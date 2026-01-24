@@ -18,6 +18,7 @@ Create detailed Product Requirements Documents that are clear, actionable, and s
 5. Save to `tasks/prd-[feature-name].md`
 
 **Important:** Do NOT start implementing. Just create the PRD.
+**Required Output Detail:** The PRD must include a `prd-id: <kebab-case>` line directly under the `# PRD: ...` title. This is mandatory for `gralph.sh` to run.
 
 ---
 
@@ -168,7 +169,7 @@ The PRD reader may be a junior developer or AI agent. Therefore:
 - **Format:** Markdown (`.md`)
 - **Location:** `tasks/`
 - **Filename:** `prd-[feature-name].md` (kebab-case)
-- **Include:** Always add a line `prd-id: <feature-name-kebab-case>` at the top of the PRD (after the # title)
+- **Include (Required):** Add a line `prd-id: <feature-name-kebab-case>` immediately after the `# PRD: ...` title. If you invent the name, generate a kebab-case `prd-id` and keep it consistent with the filename.
 
 ---
 
@@ -280,4 +281,5 @@ Before saving the PRD:
 - [ ] User stories are small and specific
 - [ ] Functional requirements are numbered and unambiguous
 - [ ] Non-goals section defines clear boundaries
+- [ ] `prd-id: <kebab-case>` present directly under the `# PRD:` title
 - [ ] Saved to `tasks/prd-[feature-name].md`
