@@ -144,6 +144,14 @@ function Json-Escape {
   return $escaped
 }
 
+function Normalize-YqScalar {
+  param([string]$Value)
+  if ($null -eq $Value) { return "" }
+  $normalized = ($Value -replace "`r", "").Trim()
+  if ($normalized -eq "null") { return "" }
+  return $normalized
+}
+
 function Resolve-RepoRoot {
   $root = & git rev-parse --show-toplevel 2>$null
   if ($LASTEXITCODE -ne 0 -or -not $root) { return (Get-Location).Path }
@@ -541,9 +549,16 @@ function Parse-Args {
 # ============================================
 
 function Check-Requirements {
-  $missing = @()
+  $missingRequired = @()
   if (-not (Get-Command yq -ErrorAction SilentlyContinue)) {
-    Log-Error "yq is required for YAML parsing. Install from https://github.com/mikefarah/yq"
+    $missingRequired += "yq (https://github.com/mikefarah/yq)"
+  }
+  if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
+    $missingRequired += "jq (https://jqlang.github.io/jq/download/)"
+  }
+  if ($missingRequired.Count -gt 0) {
+    Log-Warn "Missing required dependencies: $($missingRequired -join ', ')"
+    Log-Error "Install required dependencies and re-run."
     exit 1
   }
 
@@ -563,8 +578,19 @@ function Check-Requirements {
     Log-Info "Resuming PRD: $($script:PRD_ID)"
   } else {
     if (-not (Test-Path $script:PRD_FILE)) {
-      Log-Error "$($script:PRD_FILE) not found"
-      exit 1
+      $root = Resolve-RepoRoot
+      Push-Location $root
+      try {
+        $found = Find-PrdFile
+        if ($found) {
+          if ($found -is [System.IO.FileInfo]) { $script:PRD_FILE = $found.FullName }
+          else { $script:PRD_FILE = (Resolve-Path $found).Path }
+        }
+      } finally { Pop-Location }
+      if (-not (Test-Path $script:PRD_FILE)) {
+        Log-Error "PRD.md not found"
+        exit 1
+      }
     }
     $script:PRD_ID = Extract-PrdId $script:PRD_FILE
     if (-not $script:PRD_ID) {
@@ -614,14 +640,9 @@ function Check-Requirements {
     }
   }
 
-  if (-not (Get-Command jq -ErrorAction SilentlyContinue)) { $missing += "jq" }
   if ($script:CREATE_PR -and -not (Get-Command gh -ErrorAction SilentlyContinue)) {
     Log-Error "GitHub CLI (gh) is required for --create-pr. Install from https://cli.github.com/"
     exit 1
-  }
-  if ($missing.Count -gt 0) {
-    Log-Warn "Missing optional dependencies: $($missing -join ' ')"
-    Log-Warn "Token tracking may not work properly"
   }
 
   if (-not (Test-Path "scripts/gralph/progress.txt")) {
@@ -692,9 +713,27 @@ function Count-CompletedYaml {
   return [int]$val
 }
 
+function Invoke-YqWithEnv {
+  param(
+    [string]$EnvName,
+    [string]$EnvValue,
+    [string]$Expression,
+    [switch]$InPlace
+  )
+  $prev = Get-Item -Path "Env:$EnvName" -ErrorAction SilentlyContinue
+  try {
+    Set-Item -Path "Env:$EnvName" -Value $EnvValue
+    if ($InPlace) { & yq -i $Expression $script:PRD_FILE }
+    else { & yq -r $Expression $script:PRD_FILE 2>$null }
+  } finally {
+    if ($null -eq $prev) { Remove-Item -Path "Env:$EnvName" -ErrorAction SilentlyContinue }
+    else { Set-Item -Path "Env:$EnvName" -Value $prev.Value }
+  }
+}
+
 function Mark-TaskCompleteYaml {
   param([string]$Task)
-  & yq -i "(.tasks[] | select(.title == `"$Task`")).completed = true" $script:PRD_FILE
+  Invoke-YqWithEnv "GRALPH_TASK_TITLE" $Task '(.tasks[] | select(.title == strenv(GRALPH_TASK_TITLE))).completed = true' -InPlace
 }
 
 # ============================================
@@ -702,16 +741,16 @@ function Mark-TaskCompleteYaml {
 # ============================================
 
 function Is-YamlV1 {
-  $version = & yq -r '.version // ""' $script:PRD_FILE 2>$null
+  $version = Normalize-YqScalar (& yq -r '.version' $script:PRD_FILE 2>$null)
   if ($version -eq "1") { return $true }
   if ($version -and $version -ne "1") { return $false }
-  $hasId = & yq -r '.tasks[]?.id // empty' $script:PRD_FILE 2>$null | Select-Object -First 1
+  $hasId = Normalize-YqScalar ((& yq -r '.tasks[]?.id' $script:PRD_FILE 2>$null | Select-Object -First 1))
   return [bool]$hasId
 }
 
 function Get-TaskIdYamlV1 {
   param([int]$Index)
-  & yq -r ".tasks[$Index].id // `"`"" $script:PRD_FILE 2>$null
+  Normalize-YqScalar (& yq -r ".tasks[$Index].id" $script:PRD_FILE 2>$null)
 }
 
 function Get-AllTaskIdsYamlV1 {
@@ -724,28 +763,28 @@ function Get-PendingTaskIdsYamlV1 {
 
 function Get-TaskTitleByIdYamlV1 {
   param([string]$Id)
-  & yq -r ".tasks[] | select(.id == `"$Id`") | .title" $script:PRD_FILE 2>$null
+  Invoke-YqWithEnv "GRALPH_TASK_ID" $Id '.tasks[] | select(.id == strenv(GRALPH_TASK_ID)) | .title'
 }
 
 function Get-TaskDepsByIdYamlV1 {
   param([string]$Id)
-  & yq -r ".tasks[] | select(.id == `"$Id`") | .dependsOn[]?" $script:PRD_FILE 2>$null
+  Invoke-YqWithEnv "GRALPH_TASK_ID" $Id '.tasks[] | select(.id == strenv(GRALPH_TASK_ID)) | .dependsOn[]?'
 }
 
 function Get-TaskMutexByIdYamlV1 {
   param([string]$Id)
-  & yq -r ".tasks[] | select(.id == `"$Id`") | .mutex[]?" $script:PRD_FILE 2>$null
+  Invoke-YqWithEnv "GRALPH_TASK_ID" $Id '.tasks[] | select(.id == strenv(GRALPH_TASK_ID)) | .mutex[]?'
 }
 
 function Is-TaskCompletedYamlV1 {
   param([string]$Id)
-  $completed = & yq -r ".tasks[] | select(.id == `"$Id`") | .completed" $script:PRD_FILE 2>$null
+  $completed = Invoke-YqWithEnv "GRALPH_TASK_ID" $Id '.tasks[] | select(.id == strenv(GRALPH_TASK_ID)) | .completed'
   return ($completed -eq "true")
 }
 
 function Mark-TaskCompleteByIdYamlV1 {
   param([string]$Id)
-  & yq -i "(.tasks[] | select(.id == `"$Id`")).completed = true" $script:PRD_FILE
+  Invoke-YqWithEnv "GRALPH_TASK_ID" $Id '(.tasks[] | select(.id == strenv(GRALPH_TASK_ID))).completed = true' -InPlace
 }
 
 function Load-MutexCatalog {
@@ -765,11 +804,14 @@ function Is-ValidMutex {
 
 function Validate-TasksYamlV1 {
   $errors = @()
-  $version = & yq -r '.version // ""' $script:PRD_FILE 2>$null
+  $version = Normalize-YqScalar (& yq -r '.version' $script:PRD_FILE 2>$null)
   if ($version -and $version -ne "1") { $errors += "version must be 1 if specified (got: $version)" }
   $mutexCatalog = Load-MutexCatalog
   $allIds = @()
-  foreach ($id in (Get-AllTaskIdsYamlV1)) { if ($id) { $allIds += $id } }
+  foreach ($idRaw in (Get-AllTaskIdsYamlV1)) {
+    $id = Normalize-YqScalar $idRaw
+    if ($id) { $allIds += $id }
+  }
   $seen = @{}
   foreach ($id in $allIds) {
     if ($seen.ContainsKey($id)) { $errors += "Duplicate id: $id" } else { $seen[$id] = $true }
@@ -777,8 +819,8 @@ function Validate-TasksYamlV1 {
 
   $taskCount = [int](& yq -r '.tasks | length' $script:PRD_FILE 2>$null)
   for ($i = 0; $i -lt $taskCount; $i++) {
-    $id = & yq -r ".tasks[$i].id // `"`"" $script:PRD_FILE
-    $title = & yq -r ".tasks[$i].title // `"`"" $script:PRD_FILE
+    $id = Normalize-YqScalar (& yq -r ".tasks[$i].id" $script:PRD_FILE)
+    $title = Normalize-YqScalar (& yq -r ".tasks[$i].title" $script:PRD_FILE)
     $completedRaw = & yq -r ".tasks[$i].completed" $script:PRD_FILE
     $completed = ($completedRaw -replace "`r", "").Trim().ToLowerInvariant()
     if (-not $id) { $errors += "Task $($i + 1): missing id" }
@@ -1048,7 +1090,7 @@ Do NOT implement anything - only create the tasks.yaml file.
 
 function Get-TaskMergeNotesYamlV1 {
   param([string]$Id)
-  & yq -r ".tasks[] | select(.id == `"$Id`") | .mergeNotes // `"`"" $script:PRD_FILE 2>$null
+  Normalize-YqScalar (Invoke-YqWithEnv "GRALPH_TASK_ID" $Id '.tasks[] | select(.id == strenv(GRALPH_TASK_ID)) | .mergeNotes')
 }
 
 function Save-TaskReport {
@@ -1201,8 +1243,7 @@ function Generate-FixTasks {
 # ============================================
 
 function Get-RunBranchFromTasksYaml {
-  $name = & yq -r '.branchName // ""' $script:PRD_FILE 2>$null
-  if ($name -eq "null") { $name = "" }
+  $name = Normalize-YqScalar (& yq -r '.branchName' $script:PRD_FILE 2>$null)
   return $name
 }
 
@@ -1358,15 +1399,19 @@ function Execute-AiPrompt {
 
   $runCmd = {
     param([string[]]$Cmd, [string]$OutFile, [string]$LogFile, [string]$TeeFile)
+    if (-not $Cmd -or $Cmd.Count -eq 0) { throw "Empty command" }
+    $exe = $Cmd[0]
+    $args = @()
+    if ($Cmd.Count -gt 1) { $args = $Cmd[1..($Cmd.Count - 1)] }
     if ($TeeFile) {
       if ($LogFile) {
-        & $Cmd 2>> $LogFile | Tee-Object -FilePath $TeeFile -Append | Tee-Object -FilePath $OutFile | Out-Null
+        & $exe @args 2>> $LogFile | Tee-Object -FilePath $TeeFile -Append | Tee-Object -FilePath $OutFile | Out-Null
       } else {
-        & $Cmd | Tee-Object -FilePath $TeeFile -Append | Tee-Object -FilePath $OutFile | Out-Null
+        & $exe @args | Tee-Object -FilePath $TeeFile -Append | Tee-Object -FilePath $OutFile | Out-Null
       }
     } else {
-      if ($LogFile) { & $Cmd 2>> $LogFile | Set-Content -Path $OutFile }
-      else { & $Cmd | Set-Content -Path $OutFile }
+      if ($LogFile) { & $exe @args 2>> $LogFile | Set-Content -Path $OutFile }
+      else { & $exe @args | Set-Content -Path $OutFile }
     }
   }
 
@@ -1376,7 +1421,7 @@ function Execute-AiPrompt {
       $proc = Start-Process -FilePath $cmd[0] -ArgumentList $cmd[1..($cmd.Count - 1)] -NoNewWindow -RedirectStandardOutput $OutputFile -PassThru
       $script:ai_pid = $proc.Id
     } else {
-      & $runCmd $cmd $OutputFile $logFile $teeFile
+      & $runCmd -Cmd $cmd -OutFile $OutputFile -LogFile $logFile -TeeFile $teeFile
     }
   } finally {
     if ($workingDir) { Pop-Location }
@@ -1990,6 +2035,31 @@ if ($args.Count -gt 0 -and $args[0] -eq "--internal-run-agent-yaml-v1") {
 # MAIN
 # ============================================
 
+function Show-DryRunSummary {
+  Write-Host ""
+  Write-Host "${script:BOLD}============================================${script:RESET}"
+  Write-Host "${script:BOLD}GRALPH${script:RESET} - Dry run (no execution)"
+  $script:RUN_BRANCH = Get-RunBranchFromTasksYaml
+  if ($script:RUN_BRANCH) { Write-Host "Run branch: ${script:CYAN}$($script:RUN_BRANCH)${script:RESET}" }
+  $pendingIds = @()
+  foreach ($idRaw in (Get-PendingTaskIdsYamlV1)) {
+    $id = Normalize-YqScalar $idRaw
+    if ($id) { $pendingIds += $id }
+  }
+  if ($pendingIds.Count -eq 0) {
+    Log-Success "No pending tasks."
+    Write-Host "${script:BOLD}============================================${script:RESET}"
+    return
+  }
+  Log-Info "Pending tasks: $($pendingIds.Count)"
+  foreach ($id in $pendingIds) {
+    $title = Normalize-YqScalar (Get-TaskTitleByIdYamlV1 $id)
+    if ($title) { Write-Host "  - [$id] $title" }
+    else { Write-Host "  - [$id]" }
+  }
+  Write-Host "${script:BOLD}============================================${script:RESET}"
+}
+
 function Main {
   param([string[]]$Arguments)
   Parse-Args $Arguments
@@ -1998,6 +2068,10 @@ function Main {
   try {
     Check-Requirements
     Ensure-SkillsForEngine $script:AI_ENGINE "warn"
+    if ($script:DRY_RUN) {
+      Show-DryRunSummary
+      exit 0
+    }
     Ensure-RunBranch
     Write-Host "${script:BOLD}============================================${script:RESET}"
     Write-Host "${script:BOLD}GRALPH${script:RESET} - Running until PRD is complete"
